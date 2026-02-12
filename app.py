@@ -1,79 +1,85 @@
-Bouw een Streamlit Community Cloud app voor een real-time offshore windturbine simulator.
-Lever output als 2 bestanden: (1) app.py en (2) requirements.txt.
-De app moet direct deploybaar zijn op Streamlit Community Cloud.
+import time
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+import streamlit as st
 
-Repo/Deploy eisen:
-- app.py en requirements.txt staan in de root van de repo.
-- requirements.txt bevat minimaal: streamlit, numpy, matplotlib
-- Geen Docker, geen extra scripts nodig.
-- Geen config.toml nodig; gebruik standaard Streamlit instellingen (geen CORS/XSRF tweaks).
+st.set_page_config(page_title="Turbine Sim", layout="wide")
 
-Functionele eisen (11.DD.200 simulator):
-- Turbine: direct drive, rated power 11 MW (toon elektrisch vermogen in kW).
-- Rotor diameter: 200 m (R=100 m).
-- Hub height: 125 m (alleen informatief).
-- Real-time dynamiek met discrete tijdstappen dt en Streamlit session_state.
+st.title("Offshore Windturbine Simulator (11.DD.200)")
 
-UI (sidebar):
-1) Windsnelheid V (m/s) slider: 0–30, stap 0.1
-2) Windrichting (°) slider: 0–359, stap 1
-3) Pitch β (°) slider: -2 tot 25, stap 0.1 (handmatig instelbaar)
-4) Generator efficiency η (%) slider: 85–99, stap 0.1
-5) dt (s) slider: 0.05–1.0
-6) Yaw rate limit (°/s) slider: 0.1–2.0
-7) Run/Pause toggle + Reset button
+# Sidebar controls (basis)
+st.sidebar.header("Controls")
+wind_ms = st.sidebar.slider("Windsnelheid (m/s)", 0.0, 30.0, 10.0, 0.1)
+wind_dir = st.sidebar.slider("Windrichting (°)", 0, 359, 270, 1)
+pitch_deg = st.sidebar.slider("Pitch (°)", -2.0, 25.0, 2.0, 0.1)
+gen_eff = st.sidebar.slider("Generator efficiency (%)", 85.0, 99.0, 96.0, 0.1)
 
-Simulatie (per rerun 1 timestep als Run aan staat):
-State in st.session_state:
-- omega (rad/s)
-- yaw_abs (deg) absolute nacelle yaw (mag doorlopen >360)
-- cable_pos (deg) accumuleert yaw changes (kabeltwist)
-- unwinding (bool)
+# Constants turbine
+R = 100.0  # meter (diameter 200m)
+A = math.pi * R**2
+rho = 1.225
+rated_kw = 11000.0
 
-Fysica:
-- Aerodynamisch vermogen: P_aero = 0.5*rho*A*Cp(lambda,beta)*V_eff^3
-  - A=pi*R^2, R=100
-  - rho = 1.225 (mag ook slider)
-- Tip speed: v_tip = omega*R
-- TSR: lambda = v_tip / max(V_eff, 0.1)
-- Cp(lambda,beta): gebruik standaard empirisch Cp-model (lambda_i formule), clamp 0..0.50
-- Rotor dynamiek direct drive: J*domega/dt = T_aero - T_gen - B*omega
-  - Kies stabiele T_gen aanpak zodat omega niet divergeert
-  - Begrens elektrisch vermogen op 11 MW
-  - J en B mogen sliders of vaste defaults zijn, maar simulatie moet stabiel blijven
+# Super simpele demo-berekening (placeholder)
+# Later vervangen door jouw Cp/TSR/yaw/cable model
+cp_demo = max(0.0, min(0.45, 0.45 - 0.01 * abs(pitch_deg)))
+p_aero_kw = 0.5 * rho * A * cp_demo * (wind_ms ** 3) / 1000.0
+p_elec_kw = min(rated_kw, p_aero_kw * (gen_eff / 100.0))
 
-Yaw + windrichting:
-- Nacelle yaw beweegt richting windrichting met yaw_rate limit en een kleine deadband
-- Misalignment = wrap(wind_dir - nacelle_dir)
-- V_eff = V * cos(misalign)^(1.5), en 0 bij |misalign|>90°
+# Fake RPM (placeholder) zodat je al animatie ziet
+rpm = min(12.0, wind_ms * 0.7)  # later vervangen door echte dynamics
+omega = rpm * 2 * math.pi / 60.0
+tip_speed = omega * R
+tsr = tip_speed / max(wind_ms, 0.1)
 
-Cable twist management:
-- Max 2.5 turns = 900°: als |cable_pos| > 900°, unwinding=True
-- Bij unwinding: yaw automatisch terug naar cable_pos=0 (sneller dan normaal, bv 2x yaw_rate)
-- Als |cable_pos| < 1°: unwinding=False
+col1, col2 = st.columns([1, 1])
 
-Visualisatie (matplotlib):
-- 2D scene: zee + toren + nacelle + rotor met 3 bladen
-- Rotor animatie: blades roteren met snelheid gebaseerd op rpm/omega (sneller bij meer wind)
-- Windpijl + label: “Wind: X.X m/s @ Y°”
-- Golven (sinus) worden visueel hoger bij hogere wind (geen invloed op fysica)
-- Toon ook: nacelle yaw, misalignment, cable_pos in turns
+with col1:
+    st.subheader("Live metrics")
+    st.metric("Elektrisch vermogen (kW)", f"{p_elec_kw:,.0f}")
+    st.metric("Rotor speed (rpm)", f"{rpm:.2f}")
+    st.metric("Tip speed (m/s)", f"{tip_speed:.1f}")
+    st.metric("TSR λ", f"{tsr:.2f}")
+    st.metric("Cp (demo)", f"{cp_demo:.3f}")
 
-Live metrics (st.metric):
-- Elektrisch vermogen (kW)
-- Rotor speed (rpm)
-- Tip speed (m/s)
-- TSR (lambda)
-- Cp
-- Effectieve wind (m/s)
-- Status: normaal / unwinding / cable limit overschreden
+with col2:
+    st.subheader("Visualisatie (demo)")
+    fig, ax = plt.subplots(figsize=(7, 4))
 
-Technische eisen:
-- Geen infinite while-loops.
-- Als Run actief: voer 1 timestep uit en gebruik een korte time.sleep (bv 0.02–0.05s) zodat animatie “leeft”.
-- Alles in één app.py (geen extra modules nodig).
-- Voeg onderaan app.py een comment met “requirements.txt inhoud”.
+    # Zee + golven (hoogte ~ wind)
+    x = np.linspace(0, 10, 400)
+    wave_amp = 0.05 + 0.01 * wind_ms
+    y = wave_amp * np.sin(2 * np.pi * (x - time.time() * 0.7))
+    ax.plot(x, y)
 
-Lever als output:
-1) app.py (complete, runnable)
-2) requirements.txt
+    # Turbine (super basic)
+    ax.plot([5, 5], [0, 1.8], linewidth=6)           # toren
+    ax.plot([5, 5.4], [1.8, 1.8], linewidth=6)       # nacelle
+
+    # Rotor (cirkel + 3 bladen)
+    hub_x, hub_y = 5.4, 1.8
+    circle = plt.Circle((hub_x, hub_y), 0.35, fill=False)
+    ax.add_patch(circle)
+
+    angle = time.time() * omega  # roteert sneller bij hogere omega
+    for k in range(3):
+        a = angle + k * 2 * math.pi / 3
+        ax.plot([hub_x, hub_x + 0.35 * math.cos(a)],
+                [hub_y, hub_y + 0.35 * math.sin(a)], linewidth=3)
+
+    # Wind pijl + label
+    wd = math.radians(wind_dir)
+    ax.arrow(1, 1.7, 0.8 * math.cos(wd), 0.8 * math.sin(wd),
+             head_width=0.12, length_includes_head=True)
+    ax.text(0.8, 2.3, f"Wind: {wind_ms:.1f} m/s @ {wind_dir}°")
+
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-0.5, 3)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title("Demo scene (wordt uitgebreid met yaw/cable/pitch dynamics)")
+
+    st.pyplot(fig)
+
+st.caption("Let op: dit is een minimale werkende basis. Daarna bouwen we jouw volledige model (yaw + cable twist + Cp/TSR + dynamics).")
